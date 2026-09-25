@@ -117,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 for m in res["moves"]:
                     print(f"{m['file']}: {m['what']} -> ({m['to'][0]:g}, {m['to'][1]:g}) angle {m['to'][2]:g} {m['justify']}")
+                if res.get("junctions_added"):
+                    print(f"junction dots: {len(res['junctions_added'])}")
                 for u in res["unresolved"]:
                     print(f"unresolved: {u}")
                 if "error" in res:

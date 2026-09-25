@@ -136,14 +136,15 @@ def fix(project_path: str, sheet: str | None = None, write: bool = False, labels
                     "box_after": m.after.as_list(2),
                 }
             )
-    res = {"moves": moves, "unresolved": [u for pl in plans for u in pl.unresolved], "written": False}
-    if not write or not moves:
+    dots = [{"file": os.path.basename(pl.file), "at": list(j)} for pl in plans for j in pl.junctions]
+    res = {"moves": moves, "junctions_added": dots, "unresolved": [u for pl in plans for u in pl.unresolved], "written": False}
+    if not write or not (moves or dots):
         res["note"] = "dry run. Pass write=True to apply" if not write else "nothing to move"
         return res
-    originals = {pl.file: prj.files[pl.file].text for pl in plans if pl.moves}
+    originals = {pl.file: prj.files[pl.file].text for pl in plans if pl.moves or pl.junctions}
     sig0 = kicad.netlist_signature(prj.root_path) if verify else None
     for pl in plans:
-        if not pl.moves:
+        if not (pl.moves or pl.junctions):
             continue
         new = apply_plan(prj.files[pl.file], pl)
         with open(pl.file, "w", encoding="utf-8", newline="") as fh:

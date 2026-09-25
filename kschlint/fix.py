@@ -51,6 +51,7 @@ class Plan:
     file: str
     moves: list = field(default_factory=list)
     unresolved: list = field(default_factory=list)  # descriptions
+    junctions: list = field(default_factory=list)  # (x, y) dots to add
 
 
 # --------------------------------------------------------------------------
@@ -439,7 +440,7 @@ def _longest_texts(project: Project, sch: Schematic) -> dict:
     return out
 
 
-def plan_file(project: Project, sch: Schematic, clearance: float = 0.25, codes: set | None = None, labels: bool = True, horizontal: bool = False) -> Plan:
+def plan_file(project: Project, sch: Schematic, clearance: float = 0.25, codes: set | None = None, labels: bool = True, horizontal: bool = False, junctions: bool = True) -> Plan:
     codes = codes or MOVE_CODES
     pages = project.pages_for(sch.path)
     page = pages[0] if pages else Page(sch, f"/{sch.uuid}", "/")
@@ -452,6 +453,10 @@ def plan_file(project: Project, sch: Schematic, clearance: float = 0.25, codes: 
             it.box = _screen_box(it.text, it.obj.style, it.obj.x, it.obj.y, it.obj.angle, it.owner)
     obs = Obstacles(sc, clearance)
     plan = Plan(sch.path)
+
+    if junctions:
+        # a dot on a point where three or more items already meet: purely visual, same netlist
+        plan.junctions = sorted({(round(f.at[0], 4), round(f.at[1], 4)) for f in lint_page(page, clearance, {"missing-junction"})})
 
     wanted_syms: list = []
     wanted_labels: list = []
@@ -580,6 +585,17 @@ def apply_plan(sch: Schematic, plan: Plan) -> str:
         if m.kind == "field" and isinstance(m.owner, Symbol) and id(m.owner) not in touched_syms:
             touched_syms.add(id(m.owner))
             _remove_autoplaced(p, text, m.owner.node)
+    if plan.junctions:
+        import uuid as _uuid
+
+        nl = _newline(text)
+        first = next((c for c in sch.root.children() if c.name in ("junction", "wire")), None)
+        pos = _line_start(text, first.start) if first is not None else sch.root.end - 1
+        dots = "".join(
+            f"	(junction{nl}		(at {fmt_num(x)} {fmt_num(y)}){nl}		(diameter 0){nl}		(color 0 0 0 0){nl}		(uuid \"{_uuid.uuid4()}\"){nl}	){nl}"
+            for x, y in plan.junctions
+        )
+        p.insert(pos, dots)
     return p.apply()
 
 

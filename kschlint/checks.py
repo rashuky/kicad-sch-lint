@@ -255,11 +255,11 @@ class Linter:
         for pt in cand:
             n_end = len(ends.get(pt, []))
             n_mid = sum(1 for s in segs if point_inside_seg(pt, s.a, s.b))
-            n_pin = sum(1 for (q, _p) in pin_tips if same_pt(pt, q))
+            n_pin = len({id(_p.symbol) for (q, _p) in pin_tips if same_pt(pt, q)})  # stacked pins of one part count once
             degree = n_end + 2 * n_mid + n_pin
             has_j = any(same_pt(pt, j) for j in juncs)
-            if degree >= 3 and not has_j and n_mid > 0:
-                self.add("missing-junction", f"T connection at {_fmt(pt)} has no junction dot", pt)
+            if degree >= 3 and not has_j:
+                self.add("missing-junction", f"{degree} connections meet at {_fmt(pt)} without a junction dot", pt)
             if degree >= 4 and n_end + 2 * n_mid >= 4:
                 self.add("four-way-junction", f"{degree} connections meet at {_fmt(pt)}. Offset one branch to make two T junctions", pt)
             if has_j and degree <= 2:
