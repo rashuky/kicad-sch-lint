@@ -23,7 +23,7 @@ def build_messy(td: str) -> str:
         # R1 vertical at x=50.8, pins at y=46.99 and 54.61. Value sits inside the body (stock position)
         fx.symbol("Device:R", "R1", "10k", 50.8, 50.8, 0, "", root, ref_at=(50.8, 50.8, 90, ""), val_at=(50.8, 50.8, 90, "")),
         # R2 right next to it, reference on top of R1's pin wire
-        fx.symbol("Device:R", "R2", "4k7", 60.96, 50.8, 0, "", root, ref_at=(50.8, 44.45, 0, ""), val_at=(60.96, 50.8, 90, "")),
+        fx.symbol("Device:R", "R2", "4k7", 60.96, 50.8, 0, "", root, ref_at=(50.8, 44.45, 0, ""), val_at=(60.96, 50.8, 90, ""), autoplaced=True),
         fx.symbol("Device:C", "C1", "100n", 81.28, 50.8, 0, "", root),
         fx.wire((50.8, 46.99), (50.8, 38.1)),
         fx.wire((50.8, 38.1), (60.96, 38.1)),
@@ -76,6 +76,9 @@ class ChecksFixTest(unittest.TestCase):
         left = self.codes("warning")
         for code in ("text-overlap", "field-on-own-body", "text-over-wire"):
             self.assertNotIn(code, left, api.format_findings(api.lint(self.path)))
+        # KiCad must not re-autoplace moved fields
+        r2 = next(s for s in b.symbols if s.field("Reference").value == "R2")
+        self.assertIsNone(r2.node.child("fields_autoplaced"))
         # problems the fixer must not touch are still reported
         self.assertIn("wire-through-body", left)
         self.assertIn("label-floating", left)

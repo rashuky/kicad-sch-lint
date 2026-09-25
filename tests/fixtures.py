@@ -45,12 +45,13 @@ def prop(name: str, value: str, x: float, y: float, a: float = 0, justify: str =
     return f'(property {sexpr.quote(name)} {sexpr.quote(value)} (at {x} {y} {a}){h} (effects (font (size 1.27 1.27)){j}))'
 
 
-def symbol(lib_id, ref, value, x, y, rot=0, mirror="", root_uuid="", fields_extra="", unit=1, ref_at=None, val_at=None) -> str:
+def symbol(lib_id, ref, value, x, y, rot=0, mirror="", root_uuid="", fields_extra="", unit=1, ref_at=None, val_at=None, autoplaced=False) -> str:
     m = f" (mirror {mirror})" if mirror else ""
     ra = ref_at or (x, y - 5.08, 0, "")
     va = val_at or (x, y + 5.08, 0, "")
+    ap = " (fields_autoplaced yes)" if autoplaced else ""
     return (
-        f'(symbol (lib_id "{lib_id}") (at {x} {y} {rot}){m} (unit {unit}) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "{uid()}")\n'
+        f'(symbol (lib_id "{lib_id}") (at {x} {y} {rot}){m} (unit {unit}) (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no){ap} (uuid "{uid()}")\n'
         f"  {prop('Reference', ref, ra[0], ra[1], ra[2], ra[3])}\n"
         f"  {prop('Value', value, va[0], va[1], va[2], va[3])}\n"
         f"  {prop('Footprint', '', x, y, 0, '', True)}\n"
