@@ -106,6 +106,37 @@ TOOLS = [
             "required": ["project", "sheet", "w", "h"],
         },
     },
+    {
+        "name": "pcb_lint",
+        "description": "KiCad DRC of a .kicad_pcb. Silkscreen findings by default (reference on pads, on other silkscreen), all=true for everything.",
+        "inputSchema": {"type": "object", "properties": {"board": {"type": "string"}, "all": {"type": "boolean", "default": False}}, "required": ["board"]},
+    },
+    {
+        "name": "pcb_render",
+        "description": "PNG of a board region (F.Cu, silkscreen, courtyards, edge) as an image, silkscreen findings boxed. Use around (references) or region [x0,y0,x1,y1] mm.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "board": {"type": "string"},
+                "around": {"type": "string"},
+                "region": {"type": "array", "items": {"type": "number"}},
+                "layers": {"type": "string", "default": "F.Cu,F.Silkscreen,F.Courtyard,Edge.Cuts"},
+            },
+            "required": ["board"],
+        },
+    },
+    {
+        "name": "pcb_fix",
+        "description": (
+            "Move reference designators flagged by DRC (and ones past the board edge) to the nearest clean spot next to their own part. "
+            "Never moves footprints. With write=true it edits the board, re-runs DRC and restores the file if any non-silkscreen result changes. KiCad must be closed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"board": {"type": "string"}, "write": {"type": "boolean", "default": False}, "min_size": {"type": "number", "default": 0}},
+            "required": ["board"],
+        },
+    },
     {"name": "sch_checks", "description": "List lint check codes with severity and meaning.", "inputSchema": {"type": "object", "properties": {}}},
     {
         "name": "sch_selftest",
@@ -148,6 +179,16 @@ def call_tool(name: str, a: dict) -> list[dict]:
         return [_text(api.inspect(a["project"], a["sheet"], a.get("refs")))]
     if name == "sch_free_space":
         return [_text(api.free_space(a["project"], a["sheet"], a["w"], a["h"], a.get("near"), count=a.get("count", 3)))]
+    if name in ("pcb_lint", "pcb_render", "pcb_fix"):
+        from . import pcb
+
+        if name == "pcb_lint":
+            return [_text(pcb.lint(a["board"], silk_only=not a.get("all", False)))]
+        if name == "pcb_render":
+            res = pcb.render(a["board"], None, a.get("region"), a.get("around"), layers=a.get("layers", "F.Cu,F.Silkscreen,F.Courtyard,Edge.Cuts"))
+            with open(res["png"], "rb") as fh:
+                return [_text(res), {"type": "image", "data": base64.b64encode(fh.read()).decode(), "mimeType": "image/png"}]
+        return [_text(pcb.fix(a["board"], a.get("write", False), a.get("min_size", 0.0)))]
     if name == "sch_checks":
         return [_text(api.list_checks())]
     if name == "sch_selftest":

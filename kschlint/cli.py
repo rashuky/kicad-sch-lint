@@ -62,6 +62,24 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("selftest", help="compare text geometry with kicad-cli PDF output")
     p.add_argument("project")
 
+    p = sub.add_parser("pcb-lint", help="KiCad DRC summary of a board (silkscreen first)")
+    p.add_argument("board")
+    p.add_argument("--all", action="store_true", help="all DRC findings, not only silkscreen")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("pcb-render", help="PNG of a board region (F.Cu, silkscreen, courtyard, edge) with silkscreen findings")
+    p.add_argument("board")
+    p.add_argument("--out", "-o")
+    p.add_argument("--region", help="x0,y0,x1,y1 in mm")
+    p.add_argument("--around", help="references to zoom on")
+    p.add_argument("--layers", default="F.Cu,F.Silkscreen,F.Courtyard,Edge.Cuts")
+
+    p = sub.add_parser("pcb-fix", help="move reference designators off pads, silkscreen, other parts and the board edge")
+    p.add_argument("board")
+    p.add_argument("--write", action="store_true")
+    p.add_argument("--min-size", type=float, default=0.0, help="allow smaller reference text (mm) when nothing fits")
+    p.add_argument("--refs", help="only these references")
+
     sub.add_parser("checks", help="list check codes")
     sub.add_parser("mcp", help="run the MCP server on stdio")
 
@@ -120,6 +138,32 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if a.cmd == "selftest":
             print(json.dumps(api.selftest(a.project), indent=1))
+            return 0
+        if a.cmd in ("pcb-lint", "pcb-render", "pcb-fix"):
+            from . import pcb
+
+            if a.cmd == "pcb-lint":
+                res = pcb.lint(a.board, silk_only=not a.all)
+                if a.json:
+                    print(json.dumps(res, indent=1))
+                else:
+                    for f in res["findings"]:
+                        print(f"#{f['n']} {f['type']} @({f['at'][0]:g}, {f['at'][1]:g}): {' / '.join(f['items'])}")
+                    print(f"counts {res['counts']}  unconnected {res['unconnected']}  parity {res['parity']}")
+                return 1 if any(f["type"] != "lib_footprint_issues" for f in res["findings"]) else 0
+            if a.cmd == "pcb-render":
+                res = pcb.render(a.board, a.out, _floats(a.region) if a.region else None, a.around, layers=a.layers)
+                print(f"{res['png']}  region {res['region']}  {res['findings_drawn']} findings drawn")
+                return 0
+            res = pcb.fix(a.board, a.write, a.min_size, a.refs.split(",") if a.refs else None)
+            for m in res.get("moves", []):
+                print(f"{m['ref']}: ({m['from'][0]:g}, {m['from'][1]:g}) -> ({m['to'][0]:g}, {m['to'][1]:g}) angle {m['to'][2]:g} size {m['to'][3]:g}")
+            for u in res.get("unresolved", []):
+                print(f"unresolved: {u['ref']}")
+            if "error" in res:
+                print("ERROR:", res["error"])
+                return 2
+            print(f"written. silkscreen findings {res['silk_findings'][0]} -> {res['silk_findings'][1]}" if res.get("written") else "dry run. Pass --write to apply")
             return 0
         if a.cmd == "checks":
             for k, v in api.list_checks().items():

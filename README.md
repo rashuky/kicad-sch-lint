@@ -17,6 +17,27 @@ It answers three questions after every edit:
 Plus two helpers for building schematics: `inspect` (exact pin tip coordinates, so wires
 land on pins) and `free` (empty space for a new block).
 
+## PCB
+
+```sh
+python -m kschlint pcb-lint   BOARD.kicad_pcb [--all]
+python -m kschlint pcb-render BOARD.kicad_pcb [--around U101,C101 | --region x0,y0,x1,y1]
+python -m kschlint pcb-fix    BOARD.kicad_pcb [--write] [--min-size 0.8]
+```
+
+KiCad is the geometry engine: kicad-cli DRC finds silkscreen problems, `pcb_silk.py` runs
+in KiCad's python (pcbnew) and gets exact text, pad and silkscreen boxes from KiCad.
+`pcb-fix` moves only the Reference text of flagged footprints (and ones past the board
+edge, which DRC does not flag) to the nearest clean spot next to its own part: clear of
+pads, silkscreen, other courtyards and the edge, and nearer its own part than any other.
+Footprints never move. It writes only the moved `(at ...)` nodes, then re-runs DRC and
+restores the board if any non-silkscreen result, the unconnected count or schematic
+parity changed. MCP tools: `pcb_lint`, `pcb_render`, `pcb_fix`.
+
+References that do not fit anywhere are reported as unresolved: the parts are packed too
+tightly. Leave room for the text in the placement instead (a 1.6 mm band per row for
+1 mm text).
+
 ## Requirements
 
 - Python 3.10+, no packages for lint, fix and inspect
