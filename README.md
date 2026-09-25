@@ -86,7 +86,10 @@ Findings of reused sheets are reported once, with the list of instances.
   stack (reference above value) on the best side of the symbol. Candidates: right, top,
   left, bottom, shifted along the side. Sides without pins come first. Each candidate is
   scored against every text, body, wire and pin line on the page, the frame and the title
-  block. The widest reference over all sheet instances is used. `fields_autoplaced` is
+  block. The widest reference over all sheet instances is used. A spot is rejected
+  when the text would sit nearer another part than its own, closer than 0.4 mm to
+  another text, or (power symbols) away from its arrow or along an unrelated wire, where
+  it would read as a net name. Power symbol text only moves to a fully clean spot. `fields_autoplaced` is
   removed from moved symbols so KiCad does not undo the placement.
 - **Local labels.** Slide along the wire segment they sit on (1.27 mm steps) or flip
   side. Still on the same wire, so the same net.

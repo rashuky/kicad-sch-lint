@@ -26,6 +26,7 @@ from .sexpr import Node, Patcher, fmt_num
 MOVE_CODES = {"text-overlap", "text-over-body", "field-on-own-body", "text-over-wire", "outside-frame"}
 FIELD_GAP = 0.635
 POS_STEP = 0.127  # field anchors snap to 5 mil
+TEXT_GAP = 0.4  # minimum gap between texts of different items
 
 
 @dataclass(eq=False)
@@ -102,6 +103,9 @@ class Obstacles:
             if inter is not None:
                 hard += 1
                 pen += 50 + 20 * inter.area
+            elif kind in TEXT_KINDS + ("moved",) and core.grow(TEXT_GAP).overlaps(b):
+                hard += 1  # texts of different items glued together read as one
+                pen += 30
             elif g.overlaps(b):
                 pen += 2
         for a, bb, tag in self.segs:
@@ -192,6 +196,55 @@ def _extent(sc: Scene, sym: Symbol) -> tuple[Box, Box]:
     return body, ext
 
 
+def _box_dist(a: Box, b: Box) -> float:
+    dx = max(0.0, b.x0 - a.x1, a.x0 - b.x1)
+    dy = max(0.0, b.y0 - a.y1, a.y0 - b.y1)
+    return math.hypot(dx, dy)
+
+
+def _seg_dist(box: Box, a, b) -> float:
+    """Distance from a box to a segment (0 if they touch), coarse 0.1 mm steps up to 5 mm."""
+    d = 0.0
+    while d <= 5.0:
+        if seg_box_overlap(a, b, box.grow(d)) > 0 or box.grow(d).contains_pt(*a):
+            return d
+        d += 0.1
+    return 99.0
+
+
+class Attribution:
+    """Rejects spots where a reader would pin the text on another part or on a wire."""
+
+    def __init__(self, sc: Scene, sym: Symbol, ext: Box):
+        self.sym = sym
+        self.ext = ext
+        region = ext.grow(25)
+        self.bodies = [i.box for i in sc.items if i.kind == "body" and i.owner is not sym and i.box.overlaps(region)]
+        tips = [(p.x, p.y) for p in sc.pins if p.symbol is sym]
+        # wires that start at one of our pins belong to us (the stub of a power symbol)
+        self.wires = [
+            (w.a, w.b)
+            for w in sc.wires
+            if (seg_box_overlap(w.a, w.b, region) > 0 or region.contains_pt(*w.a))
+            and not any(same_pt(w.a, t) or same_pt(w.b, t) or point_on_seg(t, w.a, w.b) for t in tips)
+        ]
+
+    def bad(self, box: Box) -> int:
+        own = _box_dist(box, self.ext)
+        hard = 0
+        if any(_box_dist(box, b) < own - 0.01 for b in self.bodies):
+            hard += 1
+        if self.sym.is_power:
+            # power text must hug its symbol and not sit along an unrelated wire (it reads as a net name)
+            if own > 1.5:
+                hard += 1
+            if any(_seg_dist(box, a, b) < max(own, 0.3) + 0.5 for a, b in self.wires):
+                hard += 1
+        elif own > 2.0 and any(_seg_dist(box, a, b) < 0.8 for a, b in self.wires):
+            hard += 1
+        return hard
+
+
 def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, force: bool = False):
     """Return (moves, cost_after) for the visible fields of ``sym`` or (None, cost_now) if no better spot."""
     fields = [f for f in sym.fields if not f.hidden and f.value]
@@ -223,6 +276,7 @@ def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, forc
         return None, now_pen
 
     body, ext = _extent(sc, sym)
+    attrib = Attribution(sc, sym, ext)
     pin_sides = _pin_sides(sc, sym, body)
     angle = _horizontal_angle(sym)
     sizes = []
@@ -269,6 +323,9 @@ def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, forc
             ty = y_first + idx * pitch
             ax, ay, hj, box = _solve_anchor(texts[f], f.style, angle, sym, want, tx, ty)
             p, h = obs.cost(box, ignore)
+            ab = attrib.bad(box)
+            h += ab
+            p += 60 * ab
             # fields of the same symbol must not collide with each other
             for m in moves:
                 if box.grow(-0.05).overlaps(m.after):
@@ -283,6 +340,9 @@ def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, forc
         if best is None or key < best[0]:
             best = (key, moves)
     (hard, pen), moves = best
+    # power symbols only move to a clean spot, a half fix would misattribute the net name
+    if hard and sym.is_power:
+        return None, now_pen
     if hard >= now_hard and not force:
         return None, now_pen
     return moves, pen
