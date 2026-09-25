@@ -27,6 +27,8 @@ MOVE_CODES = {"text-overlap", "text-over-body", "field-on-own-body", "text-over-
 FIELD_GAP = 0.635
 POS_STEP = 0.127  # field anchors snap to 5 mil
 TEXT_GAP = 0.4  # minimum gap between texts of different items
+ATTRIB_HARD = 0.3  # text must be this much nearer its own part than any other part or label
+ATTRIB_SOFT = 1.0  # preferred margin, penalised below this
 
 
 @dataclass(eq=False)
@@ -219,7 +221,10 @@ class Attribution:
         self.sym = sym
         self.ext = ext
         region = ext.grow(25)
-        self.bodies = [i.box for i in sc.items if i.kind == "body" and i.owner is not sym and i.box.overlaps(region)]
+        # other parts and net labels: text next to them reads as theirs
+        self.bodies = [
+            i.box for i in sc.items if i.kind in ("body", "label", "sheet") and i.owner is not sym and i.box.overlaps(region)
+        ]
         tips = [(p.x, p.y) for p in sc.pins if p.symbol is sym]
         # wires that start at one of our pins belong to us (the stub of a power symbol)
         self.wires = [
@@ -229,10 +234,14 @@ class Attribution:
             and not any(same_pt(w.a, t) or same_pt(w.b, t) or point_on_seg(t, w.a, w.b) for t in tips)
         ]
 
+    def soft(self, box: Box) -> float:
+        own = _box_dist(box, self.ext)
+        return 8.0 if any(_box_dist(box, b) < own + ATTRIB_SOFT for b in self.bodies) else 0.0
+
     def bad(self, box: Box) -> int:
         own = _box_dist(box, self.ext)
         hard = 0
-        if any(_box_dist(box, b) < own - 0.01 for b in self.bodies):
+        if any(_box_dist(box, b) < own + ATTRIB_HARD for b in self.bodies):
             hard += 1
         if self.sym.is_power:
             # power text must hug its symbol and not sit along an unrelated wire (it reads as a net name)
@@ -312,6 +321,11 @@ def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, forc
                     else:
                         cy = edge_box.y1 + gap + gh / 2
                     cands.append((side, extra, k, "center", cx, cy))
+                    if len(fields) > 1:
+                        # one line, "R1 10k": fits between tightly stacked parts
+                        rh = max(h for _w, h in sizes)
+                        ry = edge_box.y0 - gap - rh / 2 if side == "top" else edge_box.y1 + gap + rh / 2
+                        cands.append((side, extra, k, "row", cx, ry))
 
     best = None
     for side, extra, k, want, tx, gcy in cands:
@@ -319,13 +333,19 @@ def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, forc
         pen = 0.0
         hard = 0
         y_first = gcy - gh / 2 + sizes[0][1] / 2
+        row_gap = 1.27 * s_max
+        row_x = tx - (sum(w for w, _h in sizes) + row_gap * (len(fields) - 1)) / 2
         for idx, f in enumerate(fields):
-            ty = y_first + idx * pitch
-            ax, ay, hj, box = _solve_anchor(texts[f], f.style, angle, sym, want, tx, ty)
+            if want == "row":
+                ax, ay, hj, box = _solve_anchor(texts[f], f.style, angle, sym, "left", row_x, gcy)
+                row_x += sizes[idx][0] + row_gap
+            else:
+                ty = y_first + idx * pitch
+                ax, ay, hj, box = _solve_anchor(texts[f], f.style, angle, sym, want, tx, ty)
             p, h = obs.cost(box, ignore)
             ab = attrib.bad(box)
             h += ab
-            p += 60 * ab
+            p += 60 * ab + attrib.soft(box)
             # fields of the same symbol must not collide with each other
             for m in moves:
                 if box.grow(-0.05).overlaps(m.after):
@@ -335,7 +355,7 @@ def plan_symbol_fields(sc: Scene, obs: Obstacles, sym: Symbol, texts: dict, forc
             hard += h
             moves.append(Move("field", f, sym, ax, ay, angle, hj, "center", cur_boxes[f.name], box))
         pref = (0 if side not in pin_sides else 6) + {"right": 0, "top": 0.5, "left": 1, "bottom": 1.5}[side]
-        pen += pref + abs(k) * 0.6 + extra * 1.5
+        pen += pref + abs(k) * 0.6 + extra * 1.5 + (3.0 if want == "row" else 0.0)
         key = (hard, pen)
         if best is None or key < best[0]:
             best = (key, moves)
@@ -395,7 +415,8 @@ def plan_label(sc: Scene, obs: Obstacles, lab: Label, item: Item):
                 key = (hard, pen)
                 if best is None or key < best[0]:
                     best = (key, Move("label", lab, lab, x, y, ang, hj, "bottom", item.box, box))
-    if best is None or best[0][0] >= now_hard:
+    # labels only move to a clean spot, a half fix just shifts the collision
+    if best is None or best[0][0] > 0:
         return None
     return best[1]
 
